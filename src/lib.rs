@@ -57,8 +57,10 @@ pub const DEFAULT_USB_TIMEOUT: Duration = Duration::from_secs(30);
 const USB_CLASS_APPLICATION_SPECIFIC: u8 = 0xFE;
 const USB_SUBCLASS_DFU: u8 = 0x01;
 
-// DFU block size
-const DFU_BLOCK_SIZE: usize = 2048;
+/// TODO: Pull block size from DFU descriptors. This is a temporary bodge 
+/// for STM32G4 compatibility.
+// DFU block size — must match device's wTransferSize
+const DFU_BLOCK_SIZE: usize = 1024;
 
 // STM32 DFU commands (vendor-specific)
 const STM32_DFU_CMD_SET_ADDRESS: u8 = 0x21;
@@ -720,14 +722,31 @@ impl Device {
             self.write_block(&handle, block, &data[start..end]).await?;
         }
         trace!("DFU download completed successfully");
-        
-        // Send zero-length download to complete the transfer
-        self.control_out(&handle, Request::Download, 0, &[]).await?;
+
+        // TODO: The below line breaks STM32G4 compatibility.
+        // // Send zero-length download to complete the transfer
+        // self.control_out(&handle, Request::Download, 0, &[]).await?;
         
         // Final status check to trigger manifest
         self.get_status(&handle).await?;
         
         trace!("DFU download session completed successfully");
+        Ok(())
+    }
+
+    /// Exit DFU mode and reset device
+    pub async fn reset(&self) -> Result<(), Error> {
+        let handle = self.open().await?;
+        trace!("DFU device opened successfully");
+
+        // Zero length download with wValue=0 tells the DfuSe bootloader to leave DFU mode
+        self.control_out(&handle, Request::Download, 0, &[]).await?;
+
+        // A usb error is expected here, ignore it
+        let _ = self.get_status(&handle).await;
+
+        trace!("Device reset completed successfully");
+
         Ok(())
     }
 }
